@@ -1,2 +1,3 @@
 # express-jwt-scope
-Express middleware to verify that access token have necessary claims for protected endpoint.
+
+Express middleware that checks authorization rights granted to the access token.

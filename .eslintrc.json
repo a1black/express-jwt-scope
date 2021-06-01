@@ -1,0 +1,24 @@
+{
+  "env": {
+    "commonjs": true,
+    "es2021": true,
+    "node": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:node/recommended",
+    "plugin:jest/recommended",
+    "prettier"
+  ],
+  "parserOptions": {
+    "ecmaVersion": 12
+  },
+  "plugins": ["jest", "node"],
+  "root": true,
+  "rules": {},
+  "settings": {
+    "jest": {
+      "version": 26
+    }
+  }
+}

@@ -18,15 +18,21 @@
   "main": "index.js",
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "errors.js",
+    "utils.js"
   ],
   "scripts": {
     "lint": "eslint index.js",
     "pretty": "prettier --check index.js",
-    "test": "NODE_ENV=test jest index.test.js --verbose"
+    "test": "NODE_ENV=test jest tests --verbose"
   },
   "engines": {
     "node": ">=14"
+  },
+  "dependencies": {
+    "lodash.get": "^4.4.2",
+    "lodash.isplainobject": "^4.0.6"
   },
   "devDependencies": {
     "eslint": "^7.27.0",

@@ -87,10 +87,10 @@ describe('parseGrantedScope helper function', () => {
   })
 
   test('granted scope has wrong claim scope delimiter, throws InternalServerError', () => {
-    const scope = 'user.read user.write'
+    const scope = 'user:read user:write'
     const claimDelimiter = ' '
     const claimCharset = '[a-z]'
-    const claimScopeDelimiter = ':'
+    const claimScopeDelimiter = '.'
 
     expect(() =>
       parseGrantedScope(
@@ -142,12 +142,13 @@ describe('parseGrantedScope helper function', () => {
 
   describe('parse supported granted scope, returns string[][]', () => {
     const scope = ['read', 'user:delete', 'post:*:delete']
-    const claimDelimiter = ','
     const claimCharset = '[a-z]'
     const claimScopeDelimiter = ':'
     const expected = [['read'], ['user', 'delete'], ['post', '*', 'delete']]
 
     test('granted scope is a string', () => {
+      const claimDelimiter = '"'
+
       expect(
         parseGrantedScope(
           scope.join(claimDelimiter),
@@ -159,6 +160,8 @@ describe('parseGrantedScope helper function', () => {
     })
 
     test('granted scope as an array', () => {
+      const claimDelimiter = ','
+
       expect(
         parseGrantedScope(
           scope,

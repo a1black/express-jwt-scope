@@ -163,13 +163,9 @@ function expressJwtScopeModule(options) {
         error(message, code) {
           throw error403(message, code)
         },
-        request: req,
+        req,
         scope,
-        token,
-        scopeKey,
-        tokenKey,
-        claimDelimiter,
-        claimScopeDelimiter
+        token
       }
 
       if (await accessChecker(grantedScope, helpers)) {

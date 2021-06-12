@@ -34,12 +34,15 @@ function moduleArgv(options) {
     tokenKey = 'user'
   } = options || {}
   const claimCharset = '[a-zA-Z0-9_]'
-  const delimiterRegex = /[-!"#$%&'()+,./:;<=>?@[\]^`{|}~ ]/
+  const delimiterRegex = /[-!"#$%&'()+,./:;<=>?@[\]^`{|}~]/
 
   const validDelimiter = delimiter =>
-    isString(delimiter) &&
-    delimiter.length === 1 &&
-    delimiterRegex.test(delimiter)
+    isString(delimiter) && delimiter.length === 1
+  const validClaimDelimiter = delimiter =>
+    validDelimiter(delimiter) &&
+    (delimiterRegex.test(delimiter) || delimiter === ' ')
+  const validClaimScopeDelimiter = delimiter =>
+    validDelimiter(delimiter) && delimiterRegex.test(delimiter)
   const delimiterError = (name, value) =>
     new ExpressJwtScopeError(
       `${name} must be unescaped ASCII punctuation character` +
@@ -48,9 +51,12 @@ function moduleArgv(options) {
       { name, value }
     )
 
-  if (claimDelimiter && !validDelimiter(claimDelimiter)) {
+  if (claimDelimiter && !validClaimDelimiter(claimDelimiter)) {
     throw delimiterError('claimDelimiter', claimDelimiter)
-  } else if (claimScopeDelimiter && !validDelimiter(claimScopeDelimiter)) {
+  } else if (
+    claimScopeDelimiter &&
+    !validClaimScopeDelimiter(claimScopeDelimiter)
+  ) {
     throw delimiterError('claimScopeDelimiter', claimScopeDelimiter)
   }
 

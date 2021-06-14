@@ -11,26 +11,43 @@ function deepCopy(origin) {
     : origin
 }
 
-/** Returns `true` if argument is a function. */
+/**
+ * Returns `true` if argument is a function.
+ */
 function isFunction(value) {
   return typeof value === 'function'
 }
 
-/** Returns `true` if argument is a string. */
+/**
+ * Returns `true` if argument is a string.
+ */
 function isString(value) {
   return typeof value === 'string' || value instanceof String
 }
 
 /**
- * Returns module configuration object formed from `options` and default values.
+ * Configuration object used by module's entities.
+ * @typedef ModuleConfig
+ * @property {boolean} [adminClaimEnabled]
+ * @property {string} [claimDelimiter]
+ * @property {string} [claimScopeDelimiter]
+ * @property {string|string[]} [scopeKey]
+ * @property {boolean} [scopeRequired]
+ * @property {string|string[]} [tokenKey]
+ */
+/**
+ * Returns configuration object using values in `option` argument and module defaults.
+ *
+ * @param {ModuleConfig}
+ * @throws {ExpressJwtScopeError} Thrown if invalid configuration option was supplied.
  */
 function moduleArgv(options) {
   let {
     adminClaimEnabled,
     claimDelimiter,
     claimScopeDelimiter,
-    scopeRequired,
     scopeKey = 'scope',
+    scopeRequired,
     tokenKey = 'user'
   } = options || {}
   const claimCharset = '[a-zA-Z0-9_]'
@@ -43,21 +60,22 @@ function moduleArgv(options) {
     (delimiterRegex.test(delimiter) || delimiter === ' ')
   const validClaimScopeDelimiter = delimiter =>
     validDelimiter(delimiter) && delimiterRegex.test(delimiter)
-  const delimiterError = (name, value) =>
-    new ExpressJwtScopeError(
-      `${name} must be unescaped ASCII punctuation character` +
-        ` (except '*' and '_') or space, got '${value}`,
-      'invalid_config_option',
-      { name, value }
-    )
 
   if (claimDelimiter && !validClaimDelimiter(claimDelimiter)) {
-    throw delimiterError('claimDelimiter', claimDelimiter)
+    throw new ExpressJwtScopeError(
+      'claimDelimiter must be unescaped ASCII punctuation character or space,' +
+        ` got '${claimDelimiter}'`,
+      'invalid_config_option'
+    )
   } else if (
     claimScopeDelimiter &&
     !validClaimScopeDelimiter(claimScopeDelimiter)
   ) {
-    throw delimiterError('claimScopeDelimiter', claimScopeDelimiter)
+    throw new ExpressJwtScopeError(
+      'claimScopeDelimiter must be unescaped ASCII punctuation character,' +
+        ` got '${claimScopeDelimiter}'`,
+      'invalid_config_option'
+    )
   }
 
   adminClaimEnabled = adminClaimEnabled === true
@@ -68,8 +86,7 @@ function moduleArgv(options) {
   if (claimDelimiter === claimScopeDelimiter) {
     throw new ExpressJwtScopeError(
       'claimDelimiter and claimScopeDelimiter can not be the same character',
-      'wrong_configuration',
-      { claimDelimiter, claimScopeDelimiter }
+      'invalid_configuration'
     )
   }
 
@@ -91,6 +108,7 @@ function moduleArgv(options) {
  * @param {string} claimCharset Regexp string of allowed characters in permission name.
  * @param {string} claimScopeDelimiter Character that separates permission's name and scope.
  * @returns {Array<function|string[]>}
+ * @throws {ExpressJwtScopeError} Thrown if recieved permsiion of invalid type or format.
  */
 function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   if (!claims.length) {
@@ -110,14 +128,8 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
     } else if (isString(claim)) {
       if (!requestedClaimRegex.test(claim)) {
         throw new ExpressJwtScopeError(
-          'Requested permission has invalid format',
-          'invalid_argument',
-          {
-            argPos: index + 1,
-            argValue: claim,
-            claimCharset,
-            claimScopeDelimiter
-          }
+          `Invalid permission was supplied at [${index + 1}]: '${claim}'`,
+          'invalid_argument'
         )
       } else if (!(claim in hash)) {
         hash[claim] = true
@@ -125,9 +137,9 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
       }
     } else {
       throw new ExpressJwtScopeError(
-        'Requested permission must be a function or a string',
-        'invalid_argument',
-        { argPos: index + 1, argValue: claim }
+        'Requested permission must be a function or a string,' +
+          ` got [${index + 1}]: ${claim}`,
+        'invalid_argument'
       )
     }
   }
@@ -143,6 +155,7 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
  * @param {string} claimCharset Regexp string of allowed characters in permission name.
  * @param {string} claimScopeDelimiter Character that separates permission's name and scope.
  * @returns {string[][]}
+ * @throws {InternalServerError} If granted permissions have unsupported format or type.
  */
 function parseGrantedScope(
   scope,
@@ -156,42 +169,24 @@ function parseGrantedScope(
 
   let claimList = scope
   if (isString(scope)) {
-    claimList = scope.split(claimDelimiter)
+    claimList = scope ? scope.split(claimDelimiter) : []
+  } else if (scope === undefined) {
+    claimList = []
   } else if (!Array.isArray(scope)) {
     throw new InternalServerError(
-      `Scope value must be an array or '${claimDelimiter}'-separated string`,
-      'unsupported_scope_type',
-      { scope, type: scope.constructor.name }
+      `Scope value must be an array or '${claimDelimiter}'-separated string,` +
+        ` got ${scope}`,
+      'unsupported_scope_type'
     )
   }
 
   const outputScope = []
   for (const [index, claim] of claimList.entries()) {
     if (!isString(claim) || !grantedClaimRegex.test(claim)) {
-      if (isString(scope) && claimList.length === 1) {
-        throw new InternalServerError(
-          'Scope value contains unallowed characters or uses wrong character as delimiter',
-          'unsupported_scope_value',
-          {
-            scope,
-            claimDelimiter,
-            claimCharset,
-            claimScopeDelimiter
-          }
-        )
-      } else {
-        throw new InternalServerError(
-          'Permission in the scope has unsupported format',
-          'unsupported_permission_value',
-          {
-            scope,
-            index,
-            permission: claim,
-            claimCharset,
-            claimScopeDelimiter
-          }
-        )
-      }
+      throw new InternalServerError(
+        `Unsupported granted permission at [${index}]: '${claim}'`,
+        'unsupported_permission_value'
+      )
     } else {
       outputScope.push(claim.split(claimScopeDelimiter))
     }

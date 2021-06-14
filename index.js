@@ -1,12 +1,32 @@
 'use strict'
 
-const path = require('path')
 const get = require('lodash.get')
 const utils = require('./utils')
 const { InternalServerError, ForbiddenError } = require('./errors')
 
 /**
- * @returns {function} Wrapper that deep-copies scope value before passing it to user defined function.
+ * @typedef CheckHelperObject
+ * @property {function} error Function that throws 403:Forbidden error.
+ * @property {Object} req Client request object.
+ * @property {string|string[]} scope Origin value of granted permissions.
+ * @property {Object} token The access token.
+ */
+/**
+ * @callback CheckCallback
+ * @param {string[][]} grantedScope
+ * @param {CheckHelperObject} [helpers]
+ * @returns {boolean}
+ */
+/**
+ * @typedef {(string|CheckCallback)} RequestedPermission
+ */
+
+/**
+ * Returns wrapper function that invokes `callable` with copies of supplied arguments.
+ *
+ * @private
+ * @param {CheckCallback} callable Callable object to wrap.
+ * @returns {CheckCallback}
  */
 const userRule = callable => async (grantedScope, helpers) =>
   callable(
@@ -20,9 +40,13 @@ const userRule = callable => async (grantedScope, helpers) =>
   )
 
 /**
- * Rule assumes that both arrays (granted permissions and requested one) have consecutive indexes.
+ * Returns function that check for `requested` permission in the granted permissions.
  *
- * @returns {function} Function that returns `true` if `requested` matches entry in the granted scope.
+ * This function assumes that granted permissions and requested one have consecutive indexes.
+ *
+ * @private
+ * @param {string[]} requested Permission to match in the granted permissions.
+ * @returns {CheckCallback}
  */
 const inGrantedRule = requested => grantedScope =>
   grantedScope.some(
@@ -34,13 +58,23 @@ const inGrantedRule = requested => grantedScope =>
   )
 
 /**
- * @returns {function} Wrapper that negates result of `rule`.
+ * Returns wrapper function that negates return of `rule`.
+ *
+ * @private
+ * @param {CheckCallback} rule Callable object to wrap.
+ * @returns {CheckCallback}
  */
 const notRule = rule => async (grantedScope, helpers) =>
   !(await rule(grantedScope, helpers))
 
 /**
- * @returns {function} Function that returns `true` if all function in `rules` returns `true`.
+ * Returns function that invokes callables from `rules` and produces conjunction of thiers returns.
+ *
+ * Produced function returns on first `false` operand.
+ *
+ * @private
+ * @param {...CheckCallback} rules List of callable objects.
+ * @returns {CheckCallback}
  */
 const andReducer =
   (...rules) =>
@@ -55,7 +89,13 @@ const andReducer =
   }
 
 /**
- * @returns {function} Function that returns `true` if any function in `rules` returns `true`.
+ * Returns function that invokes callables from `rules` and produces disjunction of thiers returns.
+ *
+ * Produced function returns on first `true` operand.
+ *
+ * @private
+ * @param {...CheckCallback} rules List of callable objects.
+ * @returns {CheckCallback}
  */
 const orReducer =
   (...rules) =>
@@ -70,17 +110,23 @@ const orReducer =
   }
 
 /**
+ * @typedef ConfigurationParameter
+ * @property {boolean} [adminClaimEnabled=false] If `true` check for *admin* claim in the access token first.
+ * @property {string} [claimDelimiter=,] Single char that separates granted claims in the access token.
+ * @property {string} [claimScopeDelimiter=:] Single char that separates claim and its scope.
+ * @property {string|string[]} [scopeKey=scope] Path to scope field inside the token, see {@link https://lodash.com/docs#get|lodash.get()}.
+ * @property {boolean} [scopeRequired=true] Determines what error would be raise if scope field is `undefined`.
+ * @property {string|string[]} [tokenKey=user] Path to token in the request, see {@link https://lodash.com/docs#get|lodash.get()}.
+ */
+/**
  * Returns middleware factory function.
  *
- * @param {object} options Configuration options of factory function.
- * @param {string} [options.tokenKey=user] Path to token in the request, see {@link https://lodash.com/docs#get|lodash.get()}.
- * @param {string} [options.scopeKey=scope] Path to scope field inside the token, see {@link https://lodash.com/docs#get|lodash.get()}.
- * @param {boolean} [options.scopeRequired=true] Determines what error would be raise if scope field is `undefined`.
- * @param {boolean} [options.adminClaimEnabled=false] If `true` check for *admin* claim in the access token first.
- * @param {string} [options.claimDelimiter=,] Single char that separates granted claims in the access token.
- * @param {string} [options.claimScopeDelimiter=:] Single char that separates claim and its scope.
+ * @exports express-jwt-scope
+ * @param {ConfigurationParameter} options Configuration for module executables.
+ * @returns {middlewareFactory}
+ * @throws {ExpressJwtScopeError} Thrown if invalid configuration option was supplied.
  */
-function expressJwtScopeModule(options) {
+function expressJwtScope(options) {
   const {
     adminClaimEnabled,
     claimCharset,
@@ -91,10 +137,11 @@ function expressJwtScopeModule(options) {
     tokenKey
   } = utils.moduleArgv(options)
 
-  /** Returns 403 HTTP status error. */
-  const error403 = (message = 'Forbidden', code = 'authorization_fail') =>
-    new ForbiddenError(message, code)
-
+  /**
+   * Wraps requested permissions with `andReducer`.
+   *
+   * @private
+   */
   const ruleQueueBuilder = claims => {
     const queue = utils
       .factoryArgv(claims, claimCharset, claimScopeDelimiter)
@@ -104,64 +151,56 @@ function expressJwtScopeModule(options) {
     return queue.length === 1 ? queue[0] : andReducer(...queue)
   }
 
-  /** Returns granted scope from the access token or throwns status 500 error. */
-  const fetchGrantedScope = req => {
-    try {
-      const isEmpty = value =>
-        value === undefined ||
-        value === '' ||
-        (Array.isArray(value) && !value.length)
-
-      // Get JWT payload
-      const token = get(req, tokenKey, undefined)
-      if (!token) {
-        throw new InternalServerError(
-          'Access token not found in the request object',
-          'token_not_found',
-          { tokenKey }
-        )
-      }
-      // Get scope value
-      const scope = get(token, scopeKey, undefined) || []
-      if (isEmpty(scope) && scopeRequired) {
-        throw error403(undefined, 'no_permissions')
-      }
-
-      const grantedScope = utils.parseGrantedScope(
-        scope,
-        claimDelimiter,
-        claimCharset,
-        claimScopeDelimiter
-      )
-
-      return [token, scope, grantedScope]
-    } catch (err) {
-      if (InternalServerError.isError(err)) {
-        Object.assign(err.details, {
-          method: req.method,
-          url: req.originUrl.split('?', 1)[0],
-          route: path.posix.join(req.baseUrl, req.route.path)
-        })
-      }
-
-      throw err
-    }
-  }
-
-  // Middleware factory function
-  return (...requested) => {
+  /**
+   * Produces middleware that check for `requested` permissions in the access token.
+   *
+   * @global
+   * @param {...RequestedPermission} requested Set of permissions needed to pass authorization check.
+   * @returns {middleware} Express middleware function.
+   * @throws {ExpressJwtScopeError} Thrown if invalid argument supplied.
+   */
+  const middlewareFactory = (...requested) => {
     let accessChecker = ruleQueueBuilder(requested)
 
     if (adminClaimEnabled) {
       accessChecker = orReducer(inGrantedRule(['admin']), accessChecker)
     }
 
+    /**
+     * Express middleware function.
+     *
+     * @global
+     * @namespace
+     * @param {Object} req Client request object.
+     * @param {Object} res Server response object.
+     * @param {function} next Function that invokes next middleware.
+     * @returns {Promise}
+     * @throws {ForbiddenError} If requested permissions weren't meet.
+     */
     const middleware = async (req, res, next) => {
-      const [token, scope, grantedScope] = fetchGrantedScope(req)
+      // Get JWT payload
+      const token = get(req, tokenKey, undefined)
+      if (!token) {
+        throw new InternalServerError(
+          `Access token not found at path: '${tokenKey}'`,
+          'token_not_found'
+        )
+      }
+      // Get scope value
+      const scope = get(token, scopeKey, undefined) || []
+      const grantedScope = utils.parseGrantedScope(
+        scope,
+        claimDelimiter,
+        claimCharset,
+        claimScopeDelimiter
+      )
+      if (!grantedScope.length && scopeRequired) {
+        throw new ForbiddenError()
+      }
 
       const helpers = {
-        error(message, code) {
-          throw error403(message, code)
+        error(message) {
+          throw new ForbiddenError(message)
         },
         req,
         scope,
@@ -171,16 +210,19 @@ function expressJwtScopeModule(options) {
       if (await accessChecker(grantedScope, helpers)) {
         next()
       } else {
-        throw error403()
+        throw new ForbiddenError()
       }
     }
 
     /**
-     * Wraps previously provided rules in a disjunction with `requested`.
+     * Adds alternative set of permissions to check in the access token if other failed.
      *
+     * @memberof middleware
      * @example
      * expressJwtScopeModule()('rule1', 'rule2').or('rule3', 'rule4')
      * // => ('rule1' && 'rule2') || ('rule3' && 'rule4')
+     * @param {...RequestedPermission} requested Set of permissions to check.
+     * @returns {middleware}
      */
     middleware.or = (...requested) => {
       accessChecker = orReducer(accessChecker, ruleQueueBuilder(requested))
@@ -188,11 +230,14 @@ function expressJwtScopeModule(options) {
     }
 
     /**
-     * Wraps previously provided rules in a conjunction with negation of `requested`.
+     * Extends initial set of required permissions with negation of `requested` permissions.
      *
+     * @memberof middleware
      * @example
      * expressJwtScopeModule()('rule1', 'rule2').not('rule3')
      * // => ('rule1' && 'rule2') && !('rule3')
+     * @param {...RequestedPermission} requested Set of permissions that mustn't be present in the access token.
+     * @returns {middleware}
      */
     middleware.not = (...requested) => {
       accessChecker = andReducer(
@@ -202,6 +247,12 @@ function expressJwtScopeModule(options) {
       return middleware
     }
 
+    /**
+     * Returns promise with rejection handler as follows `.catch(next)`.
+     *
+     * @memberof middleware
+     * @returns {Promise}
+     */
     middleware.promisify = () => (req, res, next) =>
       Promise.resolve()
         .then(() => middleware(req, res, next))
@@ -209,6 +260,8 @@ function expressJwtScopeModule(options) {
 
     return middleware
   }
+
+  return middlewareFactory
 }
 
-module.exports = expressJwtScopeModule
+module.exports = expressJwtScope

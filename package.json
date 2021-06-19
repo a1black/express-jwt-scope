@@ -18,11 +18,13 @@
   "main": "index.js",
   "files": [
     "index.js",
-    "index.d.ts",
     "errors.js",
-    "utils.js"
+    "utils.js",
+    "types/index.d.ts"
   ],
+  "types": "types",
   "scripts": {
+    "dtslint": "dtslint types",
     "lint": "eslint index.js",
     "pretty": "prettier --check index.js",
     "test": "NODE_ENV=test jest tests --verbose"
@@ -35,6 +37,8 @@
     "lodash.isplainobject": "^4.0.6"
   },
   "devDependencies": {
+    "@types/express": "^4.17.12",
+    "dtslint": "^4.1.0",
     "eslint": "^7.27.0",
     "eslint-config-prettier": "^8.3.0",
     "eslint-plugin-jest": "^24.3.6",

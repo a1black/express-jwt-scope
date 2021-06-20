@@ -2,45 +2,20 @@
 
 const { ExpressJwtScopeError, InternalServerError } = require('./errors')
 
-/**
- * Returns deep-copy of JSON serialazible `origin` object.
- */
 function deepCopy(origin) {
   return typeof origin === 'object'
     ? JSON.parse(JSON.stringify(origin))
     : origin
 }
 
-/**
- * Returns `true` if argument is a function.
- */
 function isFunction(value) {
   return typeof value === 'function'
 }
 
-/**
- * Returns `true` if argument is a string.
- */
 function isString(value) {
   return typeof value === 'string' || value instanceof String
 }
 
-/**
- * Configuration object used by module's entities.
- * @typedef ModuleConfig
- * @property {boolean} [adminClaimEnabled]
- * @property {string} [claimDelimiter]
- * @property {string} [claimScopeDelimiter]
- * @property {string|string[]} [scopeKey]
- * @property {boolean} [scopeRequired]
- * @property {string|string[]} [tokenKey]
- */
-/**
- * Returns configuration object using values in `option` argument and module defaults.
- *
- * @param {ModuleConfig}
- * @throws {ExpressJwtScopeError} Thrown if invalid configuration option was supplied.
- */
 function moduleArgv(options) {
   let {
     adminClaimEnabled,
@@ -101,15 +76,6 @@ function moduleArgv(options) {
   }
 }
 
-/**
- * Returns a new array of processed arguments of factory function.
- *
- * @param {Array<function|string>} claims List of arguments passed to the middleware factory function.
- * @param {string} claimCharset Regexp string of allowed characters in permission name.
- * @param {string} claimScopeDelimiter Character that separates permission's name and scope.
- * @returns {Array<function|string[]>}
- * @throws {ExpressJwtScopeError} Thrown if recieved permsiion of invalid type or format.
- */
 function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   if (!claims.length) {
     throw new ExpressJwtScopeError(
@@ -147,16 +113,6 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   return outputArgs
 }
 
-/**
- * Returns list of granted claims.
- *
- * @param {string|string[]} scope Scope value retrieved from the access token.
- * @param {string} claimDelimiter Character used to separate claims if scope is a string.
- * @param {string} claimCharset Regexp string of allowed characters in permission name.
- * @param {string} claimScopeDelimiter Character that separates permission's name and scope.
- * @returns {string[][]}
- * @throws {InternalServerError} If granted permissions have unsupported format or type.
- */
 function parseGrantedScope(
   scope,
   claimDelimiter,

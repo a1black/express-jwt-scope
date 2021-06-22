@@ -1,0 +1,56 @@
+{
+  "name": "express-jwt-scope",
+  "version": "0.1.0",
+  "description": "Express middleware that checks authorization rights granted to the access token",
+  "author": "Aleksey Chernyaev",
+  "license": "BSD-3-Clause",
+  "repository": "github:a1black/express-jwt-scope",
+  "keywords": [
+    "express",
+    "middleware",
+    "jwt",
+    "authorization"
+  ],
+  "homepage": "https://github.com/a1black/express-jwt-scope#readme",
+  "bugs": {
+    "url": "https://github.com/a1black/express-jwt-scope/issues"
+  },
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "errors.js",
+    "utils.js",
+    "types/index.d.ts"
+  ],
+  "types": "types",
+  "scripts": {
+    "dtslint": "dtslint --localTs node_modules/typescript/lib types",
+    "lint": "eslint index.js",
+    "pretty": "prettier --check index.js",
+    "test": "NODE_ENV=test jest tests --verbose"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "lodash.get": "^4.4.2",
+    "lodash.isplainobject": "^4.0.6"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.12",
+    "@types/jest": "^26.0.23",
+    "dtslint": "^4.1.0",
+    "eslint": "^7.27.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-jest": "^24.3.6",
+    "eslint-plugin-node": "^11.1.0",
+    "jest": "^27.0.3",
+    "pre-commit": "^1.2.2",
+    "prettier": "^2.3.0"
+  },
+  "pre-commit": [
+    "pretty",
+    "lint",
+    "test"
+  ]
+}

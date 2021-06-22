@@ -4,15 +4,19 @@ const get = require('lodash.get')
 const utils = require('./utils')
 const { InternalServerError, ForbiddenError } = require('./errors')
 
+/** Checks that access token has admin claim and it's set to `true`. */
+const adminRule =
+  path =>
+  (_, { token }) =>
+    [true, 1].includes(get(token, path, undefined))
+
 /** Invokes `callable` with copies of recieved arguments. */
 const userRule = callable => async (grantedScope, helpers) =>
   callable(
     utils.deepCopy(grantedScope),
     Object.assign({}, helpers, {
-      scope: utils.deepCopy(helpers.scope),
-      token: utils.deepCopy(helpers.token),
-      scopeKey: utils.deepCopy(helpers.scopeKey),
-      tokenKey: utils.deepCopy(helpers.tokenKey)
+      originScope: utils.deepCopy(helpers.originScope),
+      token: utils.deepCopy(helpers.token)
     })
   )
 
@@ -58,15 +62,15 @@ const orReducer =
 
 function expressJwtScope(options) {
   const {
-    adminClaimEnabled,
+    adminKey,
     claimCharset,
     claimDelimiter,
     claimScopeDelimiter,
     scopeKey,
-    scopeRequired,
     tokenKey
   } = utils.moduleArgv(options)
 
+  /** Creates checker function from list of requested permissions. */
   const ruleQueueBuilder = claims => {
     const queue = utils
       .factoryArgv(claims, claimCharset, claimScopeDelimiter)
@@ -76,39 +80,50 @@ function expressJwtScope(options) {
     return queue.length === 1 ? queue[0] : andReducer(...queue)
   }
 
-  const middlewareFactory = (...requested) => {
-    let accessChecker = ruleQueueBuilder(requested)
+  /** Factory function. */
+  const middlewareFactory = (...requestedPermissions) => {
+    let accessChecker
 
-    if (adminClaimEnabled) {
-      accessChecker = orReducer(inGrantedRule(['admin']), accessChecker)
+    if (adminKey) {
+      accessChecker = utils.isFunction(adminKey)
+        ? userRule(adminKey)
+        : adminRule(adminKey)
+      if (requestedPermissions.length) {
+        accessChecker = orReducer(
+          accessChecker,
+          ruleQueueBuilder(requestedPermissions)
+        )
+      }
+    } else {
+      accessChecker = ruleQueueBuilder(requestedPermissions)
     }
 
+    /** Request handler. */
     const middleware = async (req, res, next) => {
       const token = get(req, tokenKey, undefined)
       if (!token) {
         throw new InternalServerError(
-          `Access token not found at path: '${tokenKey}'`,
+          `Access token not found at '${tokenKey}'`,
           'token_not_found'
         )
       }
 
-      const scope = get(token, scopeKey, undefined) || []
+      const scope = get(token, scopeKey, undefined)
       const grantedScope = utils.parseGrantedScope(
         scope,
         claimDelimiter,
         claimCharset,
         claimScopeDelimiter
       )
-      if (!grantedScope.length && scopeRequired) {
-        throw new ForbiddenError()
-      }
 
       const helpers = {
         error(message) {
           throw new ForbiddenError(message)
         },
         req,
-        scope,
+        claimDelimiter,
+        claimScopeDelimiter,
+        originScope: scope,
         token
       }
 
@@ -119,15 +134,18 @@ function expressJwtScope(options) {
       }
     }
 
-    middleware.or = (...requested) => {
-      accessChecker = orReducer(accessChecker, ruleQueueBuilder(requested))
+    middleware.or = (...requestedPermissions) => {
+      accessChecker = orReducer(
+        accessChecker,
+        ruleQueueBuilder(requestedPermissions)
+      )
       return middleware
     }
 
-    middleware.not = (...requested) => {
+    middleware.not = (...requestedPermissions) => {
       accessChecker = andReducer(
         accessChecker,
-        notRule(ruleQueueBuilder(requested))
+        notRule(ruleQueueBuilder(requestedPermissions))
       )
       return middleware
     }

@@ -10,11 +10,10 @@ declare function expressJwtScope(options?: expressJwtScope.Options): expressJwtS
 declare namespace expressJwtScope {
   /** Configuration options. */
   interface Options {
-    adminClaimEnabled?: boolean;
+    adminKey?: string | string[];
     claimDelimiter?: string;
     claimScopeDelimiter?: string;
     scopeKey?: string | string[];
-    scopeRequired?: boolean;
     tokenKey?: string | string[];
   }
 
@@ -22,7 +21,9 @@ declare namespace expressJwtScope {
   interface PermissionCheckHelpers {
     error: (message: string) => never;
     req: express.Request;
-    scope: string | string[];
+    claimDelimiter: string;
+    claimScopeDelimiter: string;
+    originScope: string | string[];
     token: object;
   }
 

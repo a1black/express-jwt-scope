@@ -16,74 +16,85 @@ function isString(value) {
   return typeof value === 'string' || value instanceof String
 }
 
+/** Returns module's configuration object. */
 function moduleArgv(options) {
   let {
-    adminClaimEnabled,
-    claimDelimiter,
-    claimScopeDelimiter,
+    adminKey,
+    claimDelimiter = ',',
+    claimScopeDelimiter = ':',
     scopeKey = 'scope',
-    scopeRequired,
     tokenKey = 'user'
   } = options || {}
   const claimCharset = '[a-zA-Z0-9_]'
   const delimiterRegex = /[-!"#$%&'()+,./:;<=>?@[\]^`{|}~]/
 
   const validDelimiter = delimiter =>
-    isString(delimiter) && delimiter.length === 1
+    isString(delimiter) &&
+    delimiter.length === 1 &&
+    delimiterRegex.test(delimiter)
   const validClaimDelimiter = delimiter =>
-    validDelimiter(delimiter) &&
-    (delimiterRegex.test(delimiter) || delimiter === ' ')
-  const validClaimScopeDelimiter = delimiter =>
-    validDelimiter(delimiter) && delimiterRegex.test(delimiter)
+    validDelimiter(delimiter) || delimiter === ' '
+  const validPropPath = path =>
+    (isString(path) || Array.isArray(path)) && path.length
 
-  if (claimDelimiter && !validClaimDelimiter(claimDelimiter)) {
+  if (!validPropPath(scopeKey)) {
     throw new ExpressJwtScopeError(
-      'claimDelimiter must be unescaped ASCII punctuation character or space,' +
-        ` got '${claimDelimiter}'`,
+      `scopeKey expected non-empty string or an array, got '${scopeKey}'`,
+      'invalid_config_option'
+    )
+  } else if (!validPropPath(tokenKey)) {
+    throw new ExpressJwtScopeError(
+      `tokenKey expected non-empty string or an array, got '${tokenKey}'`,
       'invalid_config_option'
     )
   } else if (
-    claimScopeDelimiter &&
-    !validClaimScopeDelimiter(claimScopeDelimiter)
+    !(adminKey === undefined || isFunction(adminKey) || validPropPath(adminKey))
   ) {
     throw new ExpressJwtScopeError(
-      'claimScopeDelimiter must be unescaped ASCII punctuation character,' +
+      `adminKey expected non-empty string or an array, got '${adminKey}'`,
+      'invalid_config_option'
+    )
+  } else if (!validClaimDelimiter(claimDelimiter)) {
+    throw new ExpressJwtScopeError(
+      'claimDelimiter expected unescaped ASCII punctuation character or space,' +
+        ` got '${claimDelimiter}'`,
+      'invalid_config_option'
+    )
+  } else if (!validDelimiter(claimScopeDelimiter)) {
+    throw new ExpressJwtScopeError(
+      'claimScopeDelimiter expected unescaped ASCII punctuation character,' +
         ` got '${claimScopeDelimiter}'`,
+      'invalid_config_option'
+    )
+  } else if (claimDelimiter === claimScopeDelimiter) {
+    throw new ExpressJwtScopeError(
+      'claimDelimiter and claimScopeDelimiter can not be the same character',
       'invalid_config_option'
     )
   }
 
-  adminClaimEnabled = adminClaimEnabled === true
-  scopeRequired = scopeRequired !== false
-
-  claimDelimiter = claimDelimiter || ','
-  claimScopeDelimiter = claimScopeDelimiter || ':'
-  if (claimDelimiter === claimScopeDelimiter) {
-    throw new ExpressJwtScopeError(
-      'claimDelimiter and claimScopeDelimiter can not be the same character',
-      'invalid_configuration'
-    )
-  }
+  adminKey = Array.isArray(adminKey) ? adminKey.join('.') : adminKey
+  scopeKey = Array.isArray(scopeKey) ? scopeKey.join('.') : scopeKey
+  tokenKey = Array.isArray(tokenKey) ? tokenKey.join('.') : tokenKey
 
   return {
-    adminClaimEnabled,
+    adminKey,
     claimCharset,
     claimDelimiter,
     claimScopeDelimiter,
     scopeKey,
-    scopeRequired,
     tokenKey
   }
 }
 
+/** Validate and parse arguments passed to the middleware factory function. */
 function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   if (!claims.length) {
     throw new ExpressJwtScopeError(
-      'No permissions were requested to check in the access token',
+      'Expected at least one argument',
       'empty_argument_list'
     )
   }
-  const hash = {}
   const outputArgs = []
   const requestedClaimRegex = new RegExp(
     `^${claimCharset}+(\\${claimScopeDelimiter}${claimCharset}+)*$`
@@ -94,18 +105,16 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
     } else if (isString(claim)) {
       if (!requestedClaimRegex.test(claim)) {
         throw new ExpressJwtScopeError(
-          `Invalid permission was supplied at [${index + 1}]: '${claim}'`,
-          'invalid_argument'
+          `Invalid argument [${index + 1}]: '${claim}'`,
+          'invalid_permission_value'
         )
-      } else if (!(claim in hash)) {
-        hash[claim] = true
+      } else {
         outputArgs.push(claim.split(claimScopeDelimiter))
       }
     } else {
       throw new ExpressJwtScopeError(
-        'Requested permission must be a function or a string,' +
-          ` got [${index + 1}]: ${claim}`,
-        'invalid_argument'
+        `String or function argument expected, got [${index + 1}]: ${claim}`,
+        'invalid_argument_type'
       )
     }
   }
@@ -113,6 +122,7 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   return outputArgs
 }
 
+/** Validate and parse permissions obtained from the access token. */
 function parseGrantedScope(
   scope,
   claimDelimiter,
@@ -130,9 +140,9 @@ function parseGrantedScope(
     claimList = []
   } else if (!Array.isArray(scope)) {
     throw new InternalServerError(
-      `Scope value must be an array or '${claimDelimiter}'-separated string,` +
+      `Granted scope expected an array or '${claimDelimiter}'-separated string,` +
         ` got ${scope}`,
-      'unsupported_scope_type'
+      'invalid_scope_type'
     )
   }
 
@@ -140,8 +150,8 @@ function parseGrantedScope(
   for (const [index, claim] of claimList.entries()) {
     if (!isString(claim) || !grantedClaimRegex.test(claim)) {
       throw new InternalServerError(
-        `Unsupported granted permission at [${index}]: '${claim}'`,
-        'unsupported_permission_value'
+        `Invalid granted permission [${index}]: '${claim}'`,
+        'invalid_permission_value'
       )
     } else {
       outputScope.push(claim.split(claimScopeDelimiter))

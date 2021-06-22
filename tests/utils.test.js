@@ -15,11 +15,10 @@ describe('moduleArgv helper function', () => {
 
   test('configuration defaults, returns object', () => {
     expect(moduleArgv()).toMatchObject({
-      adminClaimEnabled: false,
+      adminKey: undefined,
       claimDelimiter: ',',
       claimScopeDelimiter: ':',
       scopeKey: 'scope',
-      scopeRequired: true,
       tokenKey: 'user'
     })
   })
@@ -30,16 +29,8 @@ describe('factoryArgv helper function', () => {
     expect(() => factoryArgv([])).toThrow(ExpressJwtScopeError)
   })
 
-  test('Invalid argument type, throws ExpressJwtScopeError', () => {
-    expect(() => factoryArgv([null])).toThrow(ExpressJwtScopeError)
-    expect(() => factoryArgv([true])).toThrow(ExpressJwtScopeError)
-    expect(() => factoryArgv([1000])).toThrow(ExpressJwtScopeError)
-    expect(() => factoryArgv([['read', 'write']])).toThrow(ExpressJwtScopeError)
-    expect(() => factoryArgv([{ read: true }])).toThrow(ExpressJwtScopeError)
-  })
-
-  describe("Unsupported characters in argument's value, throws ExpressJwtScopeError", () => {
-    test.each(['user-posts:delete', 'user:add,user:drop', 'user:*', 'чтение'])(
+  describe('Invalid argument, throws ExpressJwtScopeError', () => {
+    test.each([null, true, 1000, '', 'read,write', ['read'], { read: true }])(
       '%s',
       value => {
         const regex = '[a-z]'
@@ -51,20 +42,27 @@ describe('factoryArgv helper function', () => {
     )
   })
 
-  test('List of colon-separated string, returns Array of splited substrings', () => {
-    const regex = '[a-z]'
-    const sep = ':'
-    const argList = ['read', 'user:read', 'user:post:write']
-    const expected = [['read'], ['user', 'read'], ['user', 'post', 'write']]
-    expect(factoryArgv(argList, regex, sep)).toEqual(expected)
+  describe("Unsupported characters in argument's value, throws ExpressJwtScopeError", () => {
+    test.each(['user-posts:delete', 'user:*', 'чтение'])('%s', value => {
+      const regex = '[a-z]'
+      const delimiter = ':'
+      expect(() => factoryArgv([value], regex, delimiter)).toThrow(
+        ExpressJwtScopeError
+      )
+    })
   })
 
-  test('Lixed argument list of strings and functions', () => {
+  test('String or function argument expected, returns array', () => {
     const regex = '[a-z]'
     const sep = ':'
     const callable = () => true
-    const argList = ['read', callable, 'user:read']
-    const expected = [['read'], callable, ['user', 'read']]
+    const argList = ['read', 'user:read', 'user:post:write', callable]
+    const expected = [
+      ['read'],
+      ['user', 'read'],
+      ['user', 'post', 'write'],
+      callable
+    ]
 
     expect(factoryArgv(argList, regex, sep)).toEqual(expected)
   })
@@ -172,8 +170,10 @@ describe('parseGrantedScope helper function', () => {
       ).toEqual(expected)
     })
 
-    test('granted scope is an empty array', () => {
-      expect(parseGrantedScope([])).toEqual([])
+    describe('granted scope is empty value, returns an empty array', () => {
+      test.each([undefined, '', []])('%s', scope => {
+        expect(parseGrantedScope(scope)).toEqual([])
+      })
     })
   })
 })

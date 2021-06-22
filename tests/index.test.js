@@ -1,206 +1,140 @@
 const expressJwtScope = require('../index')
 const { InternalServerError, ForbiddenError } = require('../errors')
-const { TestWatcher } = require('jest')
 
-// URL and method for stub request object
-const TEST_METHOD = 'GET'
-const TEST_URL = '/unit/test'
+const ADMIN_KEY = 'admin'
+const SCOPE_KEY = 'scope'
+const TOKEN_KEY = 'user'
 
-const stubrequest = (tokenKey, scopeKey, scope) =>
-  Object.assign(
-    {},
-    {
-      baseUrl: '',
-      method: TEST_METHOD,
-      originUrl: TEST_URL,
-      route: {
-        path: TEST_URL
-      }
-    },
-    { [tokenKey]: { [scopeKey]: scope } }
+const makeMiddleware = options =>
+  expressJwtScope(
+    Object.assign(
+      {
+        scopeKey: SCOPE_KEY,
+        tokenKey: TOKEN_KEY
+      },
+      options || {}
+    )
   )
 
+const stubrequest = (scope, admin) => ({
+  [TOKEN_KEY]: {
+    [ADMIN_KEY]: admin,
+    [SCOPE_KEY]: scope
+  }
+})
+
 test('access token not found, rejects InternalServerError', async () => {
-  const tokenKey = 'user'
-  const scopeKey = 'scope'
-  const middleware = expressJwtScope({ tokenKey, scopeKey })('read')
-  const req = stubrequest('differentKey', scopeKey, 'read')
-
-  await expect(middleware(req)).rejects.toThrow(InternalServerError)
+  const middleware = makeMiddleware()('read')
+  await expect(middleware({})).rejects.toThrow(InternalServerError)
 })
 
-describe('granted scope is empty and scope is required, rejects ForbiddenError', () => {
-  const tokenKey = 'user'
-  const scopeKey = 'scope'
-  const middleware = expressJwtScope({
-    tokenKey,
-    scopeKey,
-    scopeRequired: true
-  })('read')
-
-  test.each([
-    ['differentKey', 'read'],
-    [scopeKey, undefined],
-    [scopeKey, ''],
-    [scopeKey, []]
-  ])("%s: '%s'", async (scopeKey, scope) => {
-    const req = stubrequest(tokenKey, scopeKey, scope)
-
+describe('granted scope is empty or undefined, rejects ForbiddenError', () => {
+  test.each([undefined, '', []])('%s', async scope => {
+    const middleware = makeMiddleware()('read')
+    const req = stubrequest(scope)
     await expect(middleware(req)).rejects.toThrow(ForbiddenError)
   })
 })
 
-describe("logical 'and' for multiple requested permissions", () => {
-  const tokenKey = 'user'
-  const scopeKey = 'scope'
-  const scope = 'read,write,user:*,post:delete'
+describe('check with admin rule enabled', () => {
+  test('admin claim is false, rejects ForbiddenError', async () => {
+    const middleware = makeMiddleware({ adminKey: ADMIN_KEY })()
+    const req = stubrequest(undefined, undefined)
+    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+  })
 
-  test('permission match, resolves true', async () => {
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey
-    })('write', 'user:add', 'post:delete')
-    const req = stubrequest(tokenKey, scopeKey, scope)
+  test('admin claim is false with fallback permissions, resolves true', async () => {
+    const middleware = makeMiddleware({ adminKey: ADMIN_KEY })(
+      'write',
+      'delete'
+    )
+    const req = stubrequest('read,write,delete', undefined)
     const next = jest.fn()
-
     await middleware(req, {}, next)
-    expect(next).toHaveBeenCalled()
+    expect(next).toHaveBeenCalledWith()
   })
 
-  test('permission not match, throws ForbiddenError', async () => {
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey,
-      scopeRequired: true
-    })('write', 'user:add', 'group:delete')
-    const req = stubrequest(tokenKey, scopeKey, scope)
-
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+  describe('admin claim truthfull values, resolves true', () => {
+    test.each([true, 1])('%s', async admin => {
+      const middleware = makeMiddleware({ adminKey: ADMIN_KEY })()
+      const req = stubrequest(undefined, admin)
+      const next = jest.fn()
+      await middleware(req, {}, next)
+      expect(next).toHaveBeenCalledWith()
+    })
   })
 
-  test('permission is a truthfull function, resolves true', async () => {
+  test('admin claim is callable, resolves true', async () => {
+    const truthy = jest.fn().mockResolvedValue(true)
+    const middleware = makeMiddleware({ adminKey: truthy })()
+    const req = stubrequest(undefined, false)
+    const next = jest.fn()
+    await middleware(req, {}, next)
+    expect(next).toHaveBeenCalledWith()
+    expect(truthy).toHaveBeenCalled()
+  })
+})
+
+describe("check set of permissions using logical 'and'", () => {
+  test('expect success, resolves true', async () => {
     const truthy1 = jest.fn().mockReturnValue(true)
-    const truthy2 = jest.fn().mockResolvedValue(true)
-
-    const req = stubrequest(tokenKey, scopeKey, scope)
+    const truthy2 = jest.fn().mockReturnValue(true)
+    const middleware = makeMiddleware()(
+      'post:write',
+      'comment:add',
+      truthy1,
+      truthy2
+    )
+    const req = stubrequest('post:write,post:delete,comment:*')
     const next = jest.fn()
-
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey
-    })(truthy1, truthy2)
-
     await middleware(req, {}, next)
-    expect(next).toHaveBeenCalled()
+    expect(next).toHaveBeenCalledWith()
     expect(truthy1).toHaveBeenCalled()
     expect(truthy2).toHaveBeenCalled()
   })
 
   test('permission check until first failure, throws ForbiddenError', async () => {
-    const falsy = jest.fn().mockResolvedValue(false)
     const truthy = jest.fn().mockReturnValue(true)
-
-    const req = stubrequest(tokenKey, scopeKey, scope)
-
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey
-    })(falsy, truthy)
-
+    const middleware = makeMiddleware()('write', truthy)
+    const req = stubrequest('read')
     await expect(middleware(req)).rejects.toThrow(ForbiddenError)
-    expect(falsy).toHaveBeenCalled()
     expect(truthy).not.toHaveBeenCalled()
   })
-
-  describe.each([undefined, '', []])(
-    'granted scope is empty and optional, expect execution of functional claims',
-    scope => {
-      test(`scope: '${scope}'`, async () => {
-        const truthy1 = jest.fn().mockReturnValue(true)
-        const truthy2 = jest.fn().mockResolvedValue(true)
-
-        const req = stubrequest(tokenKey, scopeKey, scope)
-        const next = jest.fn()
-
-        const middleware = expressJwtScope({
-          tokenKey,
-          scopeKey,
-          scopeRequired: false
-        })(truthy1, truthy2)
-
-        await middleware(req, {}, next)
-        expect(next).toHaveBeenCalled()
-        expect(truthy1).toHaveBeenCalled()
-        expect(truthy2).toHaveBeenCalled()
-      })
-    }
-  )
 })
 
-describe("logical 'or' for multiple requested permissions", () => {
-  const tokenKey = 'user'
-  const scopeKey = 'scope'
-  const scope = 'read,write,user:*,post:delete'
-
-  test('at least one truthfull claim, resolves true', async () => {
-    const truthy1 = jest.fn().mockReturnValue(true)
-    const truthy2 = jest.fn().mockResolvedValue(true)
-
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey
-    })('delete').or(truthy1, truthy2)
-
-    const req = stubrequest(tokenKey, scopeKey, scope)
-    const next = jest.fn()
-
-    await middleware(req, {}, next)
-    expect(next).toHaveBeenCalled()
-    expect(truthy1).toHaveBeenCalled()
-    expect(truthy2).toHaveBeenCalled()
-  })
-
-  test('check until first success, resolves true', async () => {
+describe("check set of permission using logical 'or'", () => {
+  test('permission check until first success, resolves true', async () => {
+    const falsy = jest.fn().mockReturnValue(false)
     const truthy1 = jest.fn().mockReturnValue(true)
     const truthy2 = jest.fn().mockReturnValue(true)
-    const falsy = jest.fn().mockReturnValue(false)
-
-    const middleware = expressJwtScope({
-      tokenKey,
-      scopeKey
-    })(falsy)
+    const middleware = makeMiddleware()('write')
+      .or(falsy)
       .or(truthy1)
       .or(truthy2)
-
-    const req = stubrequest(tokenKey, scopeKey, scope)
+    const req = stubrequest('read')
     const next = jest.fn()
-
     await middleware(req, {}, next)
-    expect(next).toHaveBeenCalled()
+    expect(next).toHaveBeenCalledWith()
     expect(falsy).toHaveBeenCalled()
     expect(truthy1).toHaveBeenCalled()
     expect(truthy2).not.toHaveBeenCalled()
   })
 })
 
-test('negate falsy rule, resolves true', async () => {
-  const tokenKey = 'user'
-  const scopeKey = 'scope'
-  const scope = 'read,write,user:*,post:delete'
+describe("check set of permissions using logical 'not'", () => {
+  test('expect success, resolves true', async () => {
+    const falsy = jest.fn().mockResolvedValue(false)
+    const middleware = makeMiddleware()('read').not(falsy)
+    const req = stubrequest('read')
+    const next = jest.fn()
+    await middleware(req, {}, next)
+    expect(next).toHaveBeenCalledWith()
+    expect(falsy).toHaveBeenCalled()
+  })
 
-  const truthy = jest.fn().mockReturnValue(true)
-  const falsy = jest.fn().mockReturnValue(false)
-
-  const middleware = expressJwtScope({
-    tokenKey,
-    scopeKey
-  })(truthy).not(falsy)
-
-  const req = stubrequest(tokenKey, scopeKey, scope)
-  const next = jest.fn()
-
-  await middleware(req, {}, next)
-  expect(next).toHaveBeenCalled()
-  expect(truthy).toHaveBeenCalled()
-  expect(falsy).toHaveBeenCalled()
+  test('expect failure, rejects ForbiddenError', async () => {
+    const middleware = makeMiddleware()('write').not('delete')
+    const req = stubrequest('read,write,delete')
+    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+  })
 })

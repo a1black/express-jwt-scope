@@ -60,7 +60,7 @@ app.get(
 
 If permission check fails middleware will throw `ForbiddenError` with `status` property set to `403` which can be handled by Express default error handler.
 
-**Note**: Middleware produced by this library is `async` function that doesn't explicitly passes error to the `next()`. Which means, you must promisify method ([see below](#promisify)) or use Express 5.
+**Note**: Middleware produced by this library is `async` function that doesn't explicitly passes error to the `next()`. Which means, you must use promisify method ([see below](#promisify)) or use Express 5.
 
 ## API
 
@@ -80,7 +80,7 @@ Function passed to the middleware **should have** signature `(scope, helpers) =>
   - req - reference to HTTP request object.
   - claimDelimiter - [see configuration](#configuration)
   - claimScopeDelimiter - [see configuration](#configuration)
-  - isAdmin - set to `true` if the access token possesses admin claim, `false` otherwise.
+  - isAdmin - if `adminKey` is set then result of admin claim evaluation, otherwise `undefined`.
   - originScope - copy of permission field found in the access token.
   - token - copy of the access token.
 

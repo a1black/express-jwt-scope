@@ -23,6 +23,7 @@ declare namespace expressJwtScope {
     req: express.Request;
     claimDelimiter: string;
     claimScopeDelimiter: string;
+    isAdmin?: boolean;
     originScope: string | string[];
     token: object;
   }
@@ -37,14 +38,13 @@ declare namespace expressJwtScope {
 
   /** Request handling middleware. */
   interface RequestHandler extends express.RequestHandler {
-    and: (requestedPermission: RequestedPermission, ...rest: RequestedPermission[]) => RequestHandler;
-    not: (requestedPermission: RequestedPermission, ...rest: RequestedPermission[]) => RequestHandler;
-    or: (requestedPermission: RequestedPermission, ...rest: RequestedPermission[]) => RequestHandler;
+    not: (permission: RequestedPermission, ...restPermissions: RequestedPermission[]) => RequestHandler;
+    or: (permission: RequestedPermission, ...restPermissions: RequestedPermission[]) => RequestHandler;
     promisify: () => express.RequestHandler;
   }
 
   /** Produces request handler that check the access token for requested permissions. */
   interface RequestHandlerFactory {
-    (...requestedPermissions: RequestedPermission[]): RequestHandler;
+    (...permissions: RequestedPermission[]): RequestHandler;
   }
 }

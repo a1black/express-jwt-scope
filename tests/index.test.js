@@ -1,5 +1,9 @@
 const expressJwtScope = require('../index')
-const { InternalServerError, ForbiddenError } = require('../errors')
+const {
+  InternalServerError,
+  ForbiddenError,
+  ExpressJwtScopeError
+} = require('../errors')
 
 const ADMIN_KEY = 'admin'
 const SCOPE_KEY = 'scope'
@@ -72,6 +76,57 @@ describe('check with admin rule enabled', () => {
     await middleware(req, {}, next)
     expect(next).toHaveBeenCalledWith()
     expect(truthy).toHaveBeenCalled()
+  })
+
+  test('isAdmin helper field is set, expect eq false', async () => {
+    const falsy = jest.fn().mockReturnValue(false)
+    const truthy = jest.fn().mockReturnValue(true)
+    const middleware = makeMiddleware({ adminKey: falsy })(truthy)
+    const req = stubrequest(undefined, undefined)
+    await middleware(req, {}, jest.fn())
+    expect(falsy).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({ isAdmin: undefined })
+    )
+    expect(truthy).toHaveBeenCalledWith(
+      [],
+      expect.objectContaining({ isAdmin: false })
+    )
+  })
+})
+
+describe('wildcard matching', () => {
+  test('granted explicit wildcard permission scope, resolves true', async () => {
+    const middleware = makeMiddleware()('user:add')
+    const req = stubrequest('user:*')
+    const next = jest.fn()
+    await middleware(req, {}, next)
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  test('requested implicit wildcard permission scope, resolves true', async () => {
+    const middleware = makeMiddleware()('user')
+    const req = stubrequest('user:*')
+    const next = jest.fn()
+    await middleware(req, {}, next)
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  test('granted implicit wildcard permission scope, rejects ForbiddenError', async () => {
+    const middleware = makeMiddleware()('user:add')
+    const req = stubrequest('user')
+    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+  })
+
+  test('requested explicit wildcard permission scope, throws ExpressJwtScopeError', () => {
+    const factory = makeMiddleware()
+    expect(() => factory('user:*')).toThrow(ExpressJwtScopeError)
+  })
+
+  test('wildcard permission scope is not at the end, throws ForbiddenError', async () => {
+    const middleware = makeMiddleware()('user:add')
+    const req = stubrequest('user:*:some')
+    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
   })
 })
 

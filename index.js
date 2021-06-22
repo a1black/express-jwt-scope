@@ -5,10 +5,24 @@ const utils = require('./utils')
 const { InternalServerError, ForbiddenError } = require('./errors')
 
 /** Checks that access token has admin claim and it's set to `true`. */
-const adminRule =
-  path =>
-  (_, { token }) =>
-    [true, 1].includes(get(token, path, undefined))
+const adminRule = path => (_, helpers) => {
+  const adminClaim = get(helpers.token, path, undefined)
+  helpers.isAdmin = adminClaim === true || adminClaim === 1
+  return helpers.isAdmin
+}
+
+/** Custom admin claim checker. */
+const userAdminRule = callable => async (grantedScope, helpers) => {
+  const result = await callable(
+    utils.deepCopy(grantedScope),
+    Object.assign({}, helpers, {
+      originScope: utils.deepCopy(helpers.originScope),
+      token: utils.deepCopy(helpers.token)
+    })
+  )
+  helpers.isAdmin = result
+  return result
+}
 
 /** Invokes `callable` with copies of recieved arguments. */
 const userRule = callable => async (grantedScope, helpers) =>
@@ -22,13 +36,21 @@ const userRule = callable => async (grantedScope, helpers) =>
 
 /** Checks `grantedScope` for `requested` permission. */
 const inGrantedRule = requested => grantedScope =>
-  grantedScope.some(
-    granted =>
-      granted.length === requested.length &&
-      granted.every(
+  grantedScope.some(granted => {
+    if (granted.length === requested.length) {
+      return granted.every(
         (scope, index) => scope === '*' || scope === requested[index]
       )
-  )
+    } else if (granted.length > requested.length) {
+      const tail = granted.slice(requested.length)
+      return (
+        tail.every(scope => scope === '*') &&
+        requested.every((scope, index) => scope === granted[index])
+      )
+    } else {
+      return false
+    }
+  })
 
 /** Negates return of `rule` function. */
 const notRule = rule => async (grantedScope, helpers) =>
@@ -81,21 +103,18 @@ function expressJwtScope(options) {
   }
 
   /** Factory function. */
-  const middlewareFactory = (...requestedPermissions) => {
+  const middlewareFactory = (...permissions) => {
     let accessChecker
 
     if (adminKey) {
       accessChecker = utils.isFunction(adminKey)
-        ? userRule(adminKey)
+        ? userAdminRule(adminKey)
         : adminRule(adminKey)
-      if (requestedPermissions.length) {
-        accessChecker = orReducer(
-          accessChecker,
-          ruleQueueBuilder(requestedPermissions)
-        )
+      if (permissions.length) {
+        accessChecker = orReducer(accessChecker, ruleQueueBuilder(permissions))
       }
     } else {
-      accessChecker = ruleQueueBuilder(requestedPermissions)
+      accessChecker = ruleQueueBuilder(permissions)
     }
 
     /** Request handler. */
@@ -123,6 +142,7 @@ function expressJwtScope(options) {
         req,
         claimDelimiter,
         claimScopeDelimiter,
+        isAdmin: undefined,
         originScope: scope,
         token
       }
@@ -134,18 +154,15 @@ function expressJwtScope(options) {
       }
     }
 
-    middleware.or = (...requestedPermissions) => {
-      accessChecker = orReducer(
-        accessChecker,
-        ruleQueueBuilder(requestedPermissions)
-      )
+    middleware.or = (...permissions) => {
+      accessChecker = orReducer(accessChecker, ruleQueueBuilder(permissions))
       return middleware
     }
 
-    middleware.not = (...requestedPermissions) => {
+    middleware.not = (...permissions) => {
       accessChecker = andReducer(
         accessChecker,
-        notRule(ruleQueueBuilder(requestedPermissions))
+        notRule(ruleQueueBuilder(permissions))
       )
       return middleware
     }

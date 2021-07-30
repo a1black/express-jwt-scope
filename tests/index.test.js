@@ -1,9 +1,4 @@
 const expressJwtScope = require('../index')
-const {
-  InternalServerError,
-  ForbiddenError,
-  ExpressJwtScopeError
-} = require('../errors')
 
 const ADMIN_KEY = 'admin'
 const SCOPE_KEY = 'scope'
@@ -27,24 +22,37 @@ const stubrequest = (scope, admin) => ({
   }
 })
 
-test('access token not found, rejects InternalServerError', async () => {
+test('access token not found, rejects UnauthorizedError', async () => {
   const middleware = makeMiddleware()('read')
-  await expect(middleware({})).rejects.toThrow(InternalServerError)
+  await expect(middleware({})).rejects.toThrow(
+    expressJwtScope.UnauthorizedError
+  )
+})
+
+test('access token not found and `credentialsRequired` is `false`, resolves true', async () => {
+  const middleware = makeMiddleware({ credentialsRequired: false })('read')
+  const next = jest.fn()
+  await middleware({}, {}, next)
+  expect(next).toHaveBeenCalledWith()
 })
 
 describe('granted scope is empty or undefined, rejects ForbiddenError', () => {
   test.each([undefined, '', []])('%s', async scope => {
     const middleware = makeMiddleware()('read')
     const req = stubrequest(scope)
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
   })
 })
 
 describe('check with admin rule enabled', () => {
-  test('admin claim is false, rejects ForbiddenError', async () => {
+  test('admin claim is false and granted scope is empty, rejects ForbiddenError', async () => {
     const middleware = makeMiddleware({ adminKey: ADMIN_KEY })()
     const req = stubrequest(undefined, undefined)
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
   })
 
   test('admin claim is false with fallback permissions, resolves true', async () => {
@@ -115,18 +123,24 @@ describe('wildcard matching', () => {
   test('granted implicit wildcard permission scope, rejects ForbiddenError', async () => {
     const middleware = makeMiddleware()('user:add')
     const req = stubrequest('user')
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
   })
 
   test('requested explicit wildcard permission scope, throws ExpressJwtScopeError', () => {
     const factory = makeMiddleware()
-    expect(() => factory('user:*')).toThrow(ExpressJwtScopeError)
+    expect(() => factory('user:*')).toThrow(
+      expressJwtScope.ExpressJwtScopeError
+    )
   })
 
   test('wildcard permission scope is not at the end, throws ForbiddenError', async () => {
     const middleware = makeMiddleware()('user:add')
     const req = stubrequest('user:*:some')
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
   })
 })
 
@@ -152,7 +166,9 @@ describe("check set of permissions using logical 'and'", () => {
     const truthy = jest.fn().mockReturnValue(true)
     const middleware = makeMiddleware()('write', truthy)
     const req = stubrequest('read')
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
     expect(truthy).not.toHaveBeenCalled()
   })
 })
@@ -190,6 +206,51 @@ describe("check set of permissions using logical 'not'", () => {
   test('expect failure, rejects ForbiddenError', async () => {
     const middleware = makeMiddleware()('write').not('delete')
     const req = stubrequest('read,write,delete')
-    await expect(middleware(req)).rejects.toThrow(ForbiddenError)
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
+  })
+})
+
+describe('request attachment methods', () => {
+  test('attached only on successful verification, expect undefined', async () => {
+    const falsy = jest.fn().mockReturnValue(false)
+    const middleware = makeMiddleware({ requestProperty: 'permissions' })(falsy)
+    const req = stubrequest('read')
+    await expect(middleware(req)).rejects.toThrow(
+      expressJwtScope.ForbiddenError
+    )
+    expect(req.permissions).toBeUndefined()
+  })
+
+  test('hasPermission, expect success', async () => {
+    const middleware = makeMiddleware({ requestProperty: 'permissions' })(
+      'read'
+    )
+    const req = stubrequest('read,write')
+    await middleware(req, {}, jest.fn())
+    expect(await req.permissions.hasPermission('write')).toBe(true)
+    expect(await req.permissions.hasPermission('delete')).toBe(false)
+  })
+
+  test('isAdmin, expect true', async () => {
+    const middleware = makeMiddleware({
+      adminKey: ADMIN_KEY,
+      requestProperty: 'permissions'
+    })()
+    const req = stubrequest(undefined, true)
+    await middleware(req, {}, jest.fn())
+    expect(req.permissions.isAdmin()).toBe(true)
+  })
+
+  test('isAdmin, expect false', async () => {
+    const truthy = jest.fn().mockReturnValue(true)
+    const middleware = makeMiddleware({
+      adminKey: ADMIN_KEY,
+      requestProperty: 'permissions'
+    })(truthy)
+    const req = stubrequest(undefined, undefined)
+    await middleware(req, {}, jest.fn())
+    expect(req.permissions.isAdmin()).toBe(false)
   })
 })

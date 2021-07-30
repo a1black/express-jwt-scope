@@ -6,6 +6,8 @@ const middleware = expressJwtScope({
   adminKey: 'admin',
   claimDelimiter: ',',
   claimScopeDelimiter: ':',
+  credentialsRequired: true,
+  requestProperty: 'permissions',
   scopeKey: 'scope',
   tokenKey: 'user'
 });
@@ -16,12 +18,8 @@ app.use(middleware((scope, helpers) => true));
 app.use(middleware(
   (scope, helpers) => {
     return !!(
-      helpers.error ||
       helpers.req ||
-      helpers.claimDelimiter ||
-      helpers.claimScopeDelimiter ||
       helpers.isAdmin ||
-      helpers.originScope ||
       helpers.token
     );
   })
@@ -33,3 +31,10 @@ app
   .or('read', scope => true)
   .not('read', scope => true));
 app.use(middleware('read').promisify());
+
+app.use((req, res, next) => {
+  req.permissions?.isAdmin();
+  req.permissions?.hasPermission((scope, helpers) => true);
+  req.permissions?.hasPermission('read').then(res => res).catch(err => err);
+  next();
+});

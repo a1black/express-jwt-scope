@@ -2,10 +2,27 @@
 
 const get = require('lodash.get')
 const utils = require('./utils')
-const { InternalServerError, ForbiddenError } = require('./errors')
+
+class ForbiddenError extends Error {
+  constructor(message) {
+    super(message || 'Forbidden')
+    this.name = this.constructor.name
+    this.expose = true
+    this.status = this.statusCode = 403
+  }
+}
+
+class UnauthorizedError extends Error {
+  constructor(message = 'Unauthorized') {
+    super(message)
+    this.name = this.constructor.name
+    this.expose = true
+    this.status = this.statusCode = 401
+  }
+}
 
 /** Checks that access token has admin claim and it's set to `true`. */
-const adminRule = path => (_, helpers) => {
+const adminRule = path => async (_, helpers) => {
   const adminClaim = get(helpers.token, path, undefined)
   helpers.isAdmin = adminClaim === true || adminClaim === 1
   return helpers.isAdmin
@@ -15,27 +32,21 @@ const adminRule = path => (_, helpers) => {
 const userAdminRule = callable => async (grantedScope, helpers) => {
   const result = await callable(
     utils.deepCopy(grantedScope),
-    Object.assign({}, helpers, {
-      originScope: utils.deepCopy(helpers.originScope),
-      token: utils.deepCopy(helpers.token)
-    })
+    Object.assign({}, helpers, { token: utils.deepCopy(helpers.token) })
   )
-  helpers.isAdmin = result
-  return result
+  helpers.isAdmin = result === true
+  return helpers.isAdmin
 }
 
 /** Invokes `callable` with copies of recieved arguments. */
 const userRule = callable => async (grantedScope, helpers) =>
-  callable(
+  (await callable(
     utils.deepCopy(grantedScope),
-    Object.assign({}, helpers, {
-      originScope: utils.deepCopy(helpers.originScope),
-      token: utils.deepCopy(helpers.token)
-    })
-  )
+    Object.assign({}, helpers, { token: utils.deepCopy(helpers.token) })
+  )) === true
 
 /** Checks `grantedScope` for `requested` permission. */
-const inGrantedRule = requested => grantedScope =>
+const inGrantedRule = requested => async grantedScope =>
   grantedScope.some(granted => {
     if (granted.length === requested.length) {
       return granted.every(
@@ -88,6 +99,8 @@ function expressJwtScope(options) {
     claimCharset,
     claimDelimiter,
     claimScopeDelimiter,
+    credentialsRequired,
+    requestProperty,
     scopeKey,
     tokenKey
   } = utils.moduleArgv(options)
@@ -120,11 +133,23 @@ function expressJwtScope(options) {
     /** Request handler. */
     const middleware = async (req, res, next) => {
       const token = get(req, tokenKey, undefined)
+      const helpers = {
+        req,
+        isAdmin: undefined,
+        token
+      }
+
       if (!token) {
-        throw new InternalServerError(
-          `Access token not found at '${tokenKey}'`,
-          'token_not_found'
-        )
+        if (credentialsRequired) {
+          throw new UnauthorizedError('No authorization token was found')
+        } else {
+          req[requestProperty] = {
+            isAdmin: () => false,
+            hasPermission: permission =>
+              ruleQueueBuilder([permission])([], helpers)
+          }
+          return next()
+        }
       }
 
       const scope = get(token, scopeKey, undefined)
@@ -134,20 +159,16 @@ function expressJwtScope(options) {
         claimCharset,
         claimScopeDelimiter
       )
-
-      const helpers = {
-        error(message) {
-          throw new ForbiddenError(message)
-        },
-        req,
-        claimDelimiter,
-        claimScopeDelimiter,
-        isAdmin: undefined,
-        originScope: scope,
-        token
+      if (!grantedScope) {
+        throw new ForbiddenError('Fail to read granted permissions')
       }
 
       if (await accessChecker(grantedScope, helpers)) {
+        req[requestProperty] = {
+          isAdmin: () => helpers.isAdmin === true,
+          hasPermission: permission =>
+            ruleQueueBuilder([permission])(grantedScope, helpers)
+        }
         next()
       } else {
         throw new ForbiddenError()
@@ -179,3 +200,5 @@ function expressJwtScope(options) {
 }
 
 module.exports = expressJwtScope
+module.exports.ForbiddenError = ForbiddenError
+module.exports.UnauthorizedError = UnauthorizedError

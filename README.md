@@ -46,19 +46,25 @@ app.get(
 
 ### Configuration
 
-| Name                    | Default     | Description                                                                                                   |
-| ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
-| **tokenKey**            | `user`      | Path to the decoded token (utilizes [lodash.get]()).                                                          |
-| **scopeKey**            | `scope`     | Path to the granted permissions inside the token (utilizes [lodash.get][]).                                   |
-| **adminKey**            | `undefined` | Path to the admin claim inside the token (utilizes [lodash.get][]) or a callback                              |
-| **claimDelimiter**      | `,`         | ASCII punctuation\* character (or space) used if granted permissions described as character-delimited string. |
-| **claimScopeDelimiter** | `:`         | ASCII punctuation\* character that separates permission name and its scope.                                   |
+| Name                    | Default       | Description                                                                                                   |
+| ----------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| **tokenKey**            | `user`        | Path to the decoded token (utilizes [lodash.get]()).                                                          |
+| **scopeKey**            | `scope`       | Path to the granted permissions inside the token (utilizes [lodash.get][]).                                   |
+| **adminKey**            | `undefined`   | Path to the admin claim inside the token (utilizes [lodash.get][]) or a callback                              |
+| **claimDelimiter**      | `,`           | ASCII punctuation\* character (or space) used if granted permissions described as character-delimited string. |
+| **claimScopeDelimiter** | `:`           | ASCII punctuation\* character that separates permission name and its scope.                                   |
+| **credentialsRequired** | `true`        | Throw `UnauthorizedError` if the access token is missing.                                                     |
+| **requestProperty**     | `permissions` | Path in the `req` object to attach permission verification methods, if authorization cheack passed.           |
 
 \* Punctuation characters are \-\!\"\#\$\%\&\'\(\)\+\,\.\/\:\;\<\=\>\?\@\[\]\^\`\{\|\}\~
 
 ### Error handling
 
-If permission check fails middleware will throw `ForbiddenError` with `status` property set to `403` which can be handled by Express default error handler.
+| Error               | Message                          | Status | Thrown                                                                                          |
+| ------------------- | -------------------------------- | ------ | ----------------------------------------------------------------------------------------------- |
+| `ForbiddenError`    | Forbidden                        | 403    | Authorization check failed.                                                                     |
+| `ForbiddenError`    | Fail to read granted permissions | 403    | Granted permission list has invalid type or format.                                             |
+| `UnauthorizedError` | No authorization token was found | 401    | The access token is missing in the `req` and `credentialsRequired` options is `true` (default). |
 
 **Note**: Middleware produced by this library is `async` function that doesn't explicitly passes error to the `next()`. Which means, you must use promisify method ([see below](#promisify)) or use Express 5.
 
@@ -66,7 +72,7 @@ If permission check fails middleware will throw `ForbiddenError` with `status` p
 
 ### middleware(...permissions)
 
-Sets list of permissions, all of which are required to pass authorization check. Argument's value **must be** a permission string or a function. Permissions are evaluated in the order which they are recieved.
+Sets list of permissions, all of which are required to pass authorization check. Argument's value **must be** a permission string or a function (can be asynchronous). Permissions are evaluated in the order which they are recieved.
 
 If **adminKey** is set, middleware doesn't require any arguments, otherwise at least one argument required.
 
@@ -76,12 +82,8 @@ Function passed to the middleware **should have** signature `(scope, helpers) =>
 
 - **scope** {string[][]} - An array produced by spliting granted permissions string using `claimDelimiter` and further spliting elements in resulting array using `claimScopeDelimiter`.
 - **helpers** {object}
-  - `error(message)` - function that throws `ForbiddenError` with `message`.
   - req - reference to HTTP request object.
-  - claimDelimiter - [see configuration](#configuration)
-  - claimScopeDelimiter - [see configuration](#configuration)
   - isAdmin - if `adminKey` is set then result of admin claim evaluation, otherwise `undefined`.
-  - originScope - copy of permission field found in the access token.
   - token - copy of the access token.
 
 ```js
@@ -107,7 +109,7 @@ app.use(jwtScope('write').or('user:write').or(function (scope, helpers) { ... })
 
 ### not(permisson, ...restPermissions)
 
-Adds check that none of permissions are present in the granted permissions.
+Adds `and` conjunction with negation of specified list of permissions.
 
 ```js
 const jwtScope = require('express-jwt-scope')()
@@ -122,6 +124,36 @@ Returns wrapper function that properly handles async exceptions.
 ```js
 const jwtScope = require('express-jwt-scope')()
 app.use(jwtScope('write').promisify())
+```
+
+## HTTP Request methods
+
+If authorization check was successful, middleware will extend `req` object with methods to verify user's access rights, by default methods attached to `req.permissions`.
+
+### isAdmin()
+
+Returns `true` if the access token has admin claim, otherwise `false`.
+
+### hasPermission(permission)
+
+Returns `Promise<true>` if argument matches permission in the access token or argument is a function that returns `true`.
+
+```js
+const jwt = require('express-jwt');
+const jwtScope = require('express-jwt-scope')({ adminKey: 'admin' });
+
+app.get(
+  '/protected',
+  jwt({ secret: 'secret', algorithms: ['HS256'] }),
+  jwtScope('read')
+  async (req, res, next) => {
+    res.status(200).json({ actions: {
+      read: true,
+      write: req.permissions.isAdmin() || (await req.permissions.hasPermission('write')))
+      delete: req.permissions.isAdmin()
+    }});
+  }
+)
 ```
 
 [express-jwt]: https://github.com/auth0/express-jwt#readme

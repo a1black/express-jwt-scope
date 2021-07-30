@@ -1,7 +1,5 @@
 'use strict'
 
-const { ExpressJwtScopeError, InternalServerError } = require('./errors')
-
 function deepCopy(origin) {
   return typeof origin === 'object'
     ? JSON.parse(JSON.stringify(origin))
@@ -22,6 +20,8 @@ function moduleArgv(options) {
     adminKey,
     claimDelimiter = ',',
     claimScopeDelimiter = ':',
+    credentialsRequired = true,
+    requestProperty = 'permissions',
     scopeKey = 'scope',
     tokenKey = 'user'
   } = options || {}
@@ -37,43 +37,44 @@ function moduleArgv(options) {
   const validPropPath = path =>
     (isString(path) || Array.isArray(path)) && path.length
 
-  if (!validPropPath(scopeKey)) {
-    throw new ExpressJwtScopeError(
-      `scopeKey expected non-empty string or an array, got '${scopeKey}'`,
-      'invalid_config_option'
+  if (!validPropPath(requestProperty)) {
+    throw new TypeError(
+      `requestProperty expected non-empty string or an array, got '${scopeKey}'`
+    )
+  } else if (!validPropPath(scopeKey)) {
+    throw new TypeError(
+      `scopeKey expected non-empty string or an array, got '${scopeKey}'`
     )
   } else if (!validPropPath(tokenKey)) {
-    throw new ExpressJwtScopeError(
-      `tokenKey expected non-empty string or an array, got '${tokenKey}'`,
-      'invalid_config_option'
+    throw new TypeError(
+      `tokenKey expected non-empty string or an array, got '${tokenKey}'`
     )
   } else if (
     !(adminKey === undefined || isFunction(adminKey) || validPropPath(adminKey))
   ) {
-    throw new ExpressJwtScopeError(
-      `adminKey expected non-empty string or an array, got '${adminKey}'`,
-      'invalid_config_option'
+    throw new TypeError(
+      `adminKey expected non-empty string or an array, got '${adminKey}'`
     )
   } else if (!validClaimDelimiter(claimDelimiter)) {
-    throw new ExpressJwtScopeError(
+    throw new Error(
       'claimDelimiter expected unescaped ASCII punctuation character or space,' +
-        ` got '${claimDelimiter}'`,
-      'invalid_config_option'
+        ` got '${claimDelimiter}'`
     )
   } else if (!validDelimiter(claimScopeDelimiter)) {
-    throw new ExpressJwtScopeError(
+    throw new Error(
       'claimScopeDelimiter expected unescaped ASCII punctuation character,' +
-        ` got '${claimScopeDelimiter}'`,
-      'invalid_config_option'
+        ` got '${claimScopeDelimiter}'`
     )
   } else if (claimDelimiter === claimScopeDelimiter) {
-    throw new ExpressJwtScopeError(
-      'claimDelimiter and claimScopeDelimiter can not be the same character',
-      'invalid_config_option'
+    throw new Error(
+      'claimDelimiter and claimScopeDelimiter can not be the same character'
     )
   }
 
   adminKey = Array.isArray(adminKey) ? adminKey.join('.') : adminKey
+  requestProperty = Array.isArray(requestProperty)
+    ? requestProperty.join('.')
+    : requestProperty
   scopeKey = Array.isArray(scopeKey) ? scopeKey.join('.') : scopeKey
   tokenKey = Array.isArray(tokenKey) ? tokenKey.join('.') : tokenKey
 
@@ -82,6 +83,8 @@ function moduleArgv(options) {
     claimCharset,
     claimDelimiter,
     claimScopeDelimiter,
+    credentialsRequired: credentialsRequired !== false,
+    requestProperty,
     scopeKey,
     tokenKey
   }
@@ -90,10 +93,7 @@ function moduleArgv(options) {
 /** Validate and parse arguments passed to the middleware factory function. */
 function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
   if (!claims.length) {
-    throw new ExpressJwtScopeError(
-      'Expected at least one argument',
-      'empty_argument_list'
-    )
+    throw new Error('Expected at least one argument')
   }
   const outputArgs = []
   const requestedClaimRegex = new RegExp(
@@ -104,17 +104,13 @@ function factoryArgv(claims, claimCharset, claimScopeDelimiter) {
       outputArgs.push(claim)
     } else if (isString(claim)) {
       if (!requestedClaimRegex.test(claim)) {
-        throw new ExpressJwtScopeError(
-          `Invalid argument [${index + 1}]: '${claim}'`,
-          'invalid_permission_value'
-        )
+        throw new Error(`Invalid argument [${index + 1}]: '${claim}'`)
       } else {
         outputArgs.push(claim.split(claimScopeDelimiter))
       }
     } else {
-      throw new ExpressJwtScopeError(
-        `String or function argument expected, got [${index + 1}]: ${claim}`,
-        'invalid_argument_type'
+      throw new TypeError(
+        `String or function argument expected, got [${index + 1}]: ${claim}`
       )
     }
   }
@@ -139,20 +135,13 @@ function parseGrantedScope(
   } else if (scope === undefined) {
     claimList = []
   } else if (!Array.isArray(scope)) {
-    throw new InternalServerError(
-      `Granted scope expected an array or '${claimDelimiter}'-separated string,` +
-        ` got ${scope}`,
-      'invalid_scope_type'
-    )
+    return null
   }
 
   const outputScope = []
-  for (const [index, claim] of claimList.entries()) {
+  for (const claim of claimList) {
     if (!isString(claim) || !grantedClaimRegex.test(claim)) {
-      throw new InternalServerError(
-        `Invalid granted permission [${index}]: '${claim}'`,
-        'invalid_permission_value'
-      )
+      return null
     } else {
       outputScope.push(claim.split(claimScopeDelimiter))
     }

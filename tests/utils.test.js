@@ -1,5 +1,4 @@
 const { factoryArgv, moduleArgv, parseGrantedScope } = require('../utils')
-const { ExpressJwtScopeError, InternalServerError } = require('../errors')
 
 describe('moduleArgv helper function', () => {
   test.each([
@@ -9,8 +8,8 @@ describe('moduleArgv helper function', () => {
       'duplicating delimiters',
       { claimDelimiter: ',', claimScopeDelimiter: ',' }
     ]
-  ])('%s, throws ExpressJwtScopeError', (_, options) => {
-    expect(() => moduleArgv(options)).toThrow(ExpressJwtScopeError)
+  ])('%s, throws Error', (_, options) => {
+    expect(() => moduleArgv(options)).toThrow(Error)
   })
 
   test('configuration defaults, returns object', () => {
@@ -18,6 +17,8 @@ describe('moduleArgv helper function', () => {
       adminKey: undefined,
       claimDelimiter: ',',
       claimScopeDelimiter: ':',
+      credentialsRequired: true,
+      requestProperty: 'permissions',
       scopeKey: 'scope',
       tokenKey: 'user'
     })
@@ -25,30 +26,26 @@ describe('moduleArgv helper function', () => {
 })
 
 describe('factoryArgv helper function', () => {
-  test('Empty argument list, throws ExpressJwtScopeError', () => {
-    expect(() => factoryArgv([])).toThrow(ExpressJwtScopeError)
+  test('Empty argument list, throws Error', () => {
+    expect(() => factoryArgv([])).toThrow('Expected at least one argument')
   })
 
-  describe('Invalid argument, throws ExpressJwtScopeError', () => {
+  describe('Invalid argument, throws Error', () => {
     test.each([null, true, 1000, '', 'read,write', ['read'], { read: true }])(
       '%s',
       value => {
         const regex = '[a-z]'
         const delimiter = ':'
-        expect(() => factoryArgv([value], regex, delimiter)).toThrow(
-          ExpressJwtScopeError
-        )
+        expect(() => factoryArgv([value], regex, delimiter)).toThrow(Error)
       }
     )
   })
 
-  describe("Unsupported characters in argument's value, throws ExpressJwtScopeError", () => {
+  describe("Unsupported characters in argument's value, throws Error", () => {
     test.each(['user-posts:delete', 'user:*', 'чтение'])('%s', value => {
       const regex = '[a-z]'
       const delimiter = ':'
-      expect(() => factoryArgv([value], regex, delimiter)).toThrow(
-        ExpressJwtScopeError
-      )
+      expect(() => factoryArgv([value], regex, delimiter)).toThrow(Error)
     })
   })
 
@@ -69,38 +66,38 @@ describe('factoryArgv helper function', () => {
 })
 
 describe('parseGrantedScope helper function', () => {
-  test('granted scope has wrong claim delimiter, throws InternalServerError', () => {
+  test('granted scope has wrong claim delimiter, returns null', () => {
     const scope = 'user:read user:write'
     const claimDelimiter = ','
     const claimCharset = '[a-z]'
     const claimScopeDelimiter = ':'
-    expect(() =>
+    expect(
       parseGrantedScope(
         scope,
         claimDelimiter,
         claimCharset,
         claimScopeDelimiter
       )
-    ).toThrow(InternalServerError)
+    ).toBeNull()
   })
 
-  test('granted scope has wrong claim scope delimiter, throws InternalServerError', () => {
+  test('granted scope has wrong claim scope delimiter, returns null', () => {
     const scope = 'user:read user:write'
     const claimDelimiter = ' '
     const claimCharset = '[a-z]'
     const claimScopeDelimiter = '.'
 
-    expect(() =>
+    expect(
       parseGrantedScope(
         scope,
         claimDelimiter,
         claimCharset,
         claimScopeDelimiter
       )
-    ).toThrow(InternalServerError)
+    ).toBeNull()
   })
 
-  describe('granted scope badly formated string, throws InternalServerError', () => {
+  describe('granted scope badly formated string, returns null', () => {
     const claimDelimiter = ','
     const claimCharset = '[a-z]'
     const claimScopeDelimiter = ':'
@@ -110,31 +107,31 @@ describe('parseGrantedScope helper function', () => {
       ['scope has trailing delimiter', 'read,write,'],
       ['permission value has trailing spaces', 'read, write']
     ])("%s: '%s'", (_, scope) => {
-      expect(() =>
+      expect(
         parseGrantedScope(
           scope,
           claimDelimiter,
           claimCharset,
           claimScopeDelimiter
         )
-      ).toThrow(InternalServerError)
+      ).toBeNull()
     })
   })
 
-  describe('granted permission has unsupported characters, throws InternalServerError', () => {
+  describe('granted permission has unsupported characters, returns null', () => {
     const claimDelimiter = ','
     const claimCharset = '[a-z]'
     const claimScopeDelimiter = ':'
 
     test.each(['чтение', '*,user', ['user-post:delete']])('%s', scope => {
-      expect(() =>
+      expect(
         parseGrantedScope(
           scope,
           claimDelimiter,
           claimCharset,
           claimScopeDelimiter
         )
-      ).toThrow(InternalServerError)
+      ).toBeNull()
     })
   })
 

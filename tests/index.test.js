@@ -223,6 +223,51 @@ describe('request attachment methods', () => {
     expect(req.permissions).toBeUndefined()
   })
 
+  test('token not required, expect false', async () => {
+    const truthy = jest.fn().mockReturnValue(true)
+    const middleware = makeMiddleware({
+      adminKey: truthy,
+      credentialsRequired: false,
+      requestProperty: 'permissions'
+    })('read')
+    const req = {}
+    await middleware(req, {}, jest.fn())
+
+    expect(truthy).not.toHaveBeenCalled()
+    expect(req.permissions.isAdmin()).toBe(false)
+    await expect(req.permissions.hasPermission('read')).resolves.toBe(false)
+    await expect(req.permissions.allowed('read')).resolves.toBe(false)
+  })
+
+  test('allowed where not admin, expect success', async () => {
+    const falsy = jest.fn().mockReturnValue(false)
+    const middleware = makeMiddleware({
+      adminKey: falsy,
+      requestProperty: 'permissions'
+    })('read')
+    const req = stubrequest('read,write')
+    await middleware(req, {}, jest.fn())
+
+    expect(falsy).toHaveBeenCalledTimes(1)
+    await expect(req.permissions.allowed('write')).resolves.toBe(true)
+    await expect(req.permissions.allowed('delete')).resolves.toBe(false)
+  })
+
+  test('allowed where is admin, expect success', async () => {
+    const falsy = jest.fn().mockReturnValue(false)
+    const middleware = makeMiddleware({
+      adminKey: ADMIN_KEY,
+      requestProperty: 'permissions'
+    })(falsy)
+    const req = stubrequest('read,write', true)
+    await middleware(req, {}, jest.fn())
+
+    await expect(req.permissions.allowed('write')).resolves.toBe(true)
+    await expect(req.permissions.allowed('delete')).resolves.toBe(true)
+    await expect(req.permissions.allowed(falsy)).resolves.toBe(true)
+    expect(falsy).not.toHaveBeenCalled()
+  })
+
   test('hasPermission, expect success', async () => {
     const middleware = makeMiddleware({ requestProperty: 'permissions' })(
       'read'

@@ -144,9 +144,18 @@ function expressJwtScope(options) {
           throw new UnauthorizedError('No authorization token was found')
         } else {
           req[requestProperty] = {
-            isAdmin: () => false,
-            hasPermission: permission =>
-              ruleQueueBuilder([permission])([], helpers)
+            allowed(permission) {
+              return orReducer(
+                this.isAdmin.bind(this),
+                this.hasPermission.bind(this, permission)
+              )([], helpers)
+            },
+            isAdmin() {
+              return false
+            },
+            hasPermission(permission) {
+              return ruleQueueBuilder([permission])([], helpers)
+            }
           }
           return next()
         }
@@ -165,9 +174,18 @@ function expressJwtScope(options) {
 
       if (await accessChecker(grantedScope, helpers)) {
         req[requestProperty] = {
-          isAdmin: () => helpers.isAdmin === true,
-          hasPermission: permission =>
-            ruleQueueBuilder([permission])(grantedScope, helpers)
+          allowed(permission) {
+            return orReducer(
+              this.isAdmin.bind(this),
+              this.hasPermission.bind(this, permission)
+            )(grantedScope, helpers)
+          },
+          isAdmin() {
+            return helpers.isAdmin === true
+          },
+          hasPermission(permission) {
+            return ruleQueueBuilder([permission])(grantedScope, helpers)
+          }
         }
         next()
       } else {

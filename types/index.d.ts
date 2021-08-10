@@ -87,6 +87,8 @@ declare namespace expressJwtScope {
 declare global {
   namespace Express {
     interface Permissions {
+      /** Returns `true` if has admin claim or requested permission. */
+      allowed(permission: string | expressJwtScope.Checker): Promise<boolean>;
       /** Returns `true` if the access token has admin claim. */
       isAdmin(): boolean;
       /** Returns `true` if the access token has requested permission. */

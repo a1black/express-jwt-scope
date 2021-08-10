@@ -40,7 +40,7 @@ app.get(
   jwt({ secret: 'secret', algorithms: ['HS256'] }),
   // Grand access if ('read' OR ('user:read' AND 'user:write')) AND !(callback())
   jwtScope('read').or('user:read', 'user:write').not(function (scope, helpers) { ... }),
-  (req, res, next) => { res.sendStatus(200); }
+  (req, res, next) => { res.sendStatus(200) }
 )
 ```
 
@@ -147,11 +147,35 @@ app.get(
   jwt({ secret: 'secret', algorithms: ['HS256'] }),
   jwtScope('read')
   async (req, res, next) => {
-    res.status(200).json({ actions: {
-      read: true,
-      write: req.permissions.isAdmin() || (await req.permissions.hasPermission('write')))
-      delete: req.permissions.isAdmin()
-    }});
+    res.status(200).json({
+      actions: {
+        write: (await req.permissions.hasPermission('write')),
+        delete: (await req.permissions.hasPermission('write'))
+      }
+    })
+  }
+)
+```
+
+### allowed(permission)
+
+Returns `Promise<boolean>` produced by **OR** (conjunction) of `isAdmin` and `hasPermission` methods.
+
+```js
+const jwt = require('express-jwt');
+const jwtScope = require('express-jwt-scope')({ adminKey: 'admin' });
+
+app.get(
+  '/protected',
+  jwt({ secret: 'secret', algorithms: ['HS256'] }),
+  jwtScope('read')
+  async (req, res, next) => {
+    res.status(200).json({
+      actions: {
+        write: (await req.permissions.allowed('write')),
+        delete: (await req.permissions.allowed('delete')),
+      }
+    })
   }
 )
 ```

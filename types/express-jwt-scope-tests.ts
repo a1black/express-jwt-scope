@@ -33,6 +33,8 @@ app
 app.use(middleware('read').promisify());
 
 app.use((req, res, next) => {
+  req.permissions?.allowed((scope, helpers) => true);
+  req.permissions?.allowed('read').then(res => res).catch(err => err);
   req.permissions?.isAdmin();
   req.permissions?.hasPermission((scope, helpers) => true);
   req.permissions?.hasPermission('read').then(res => res).catch(err => err);
